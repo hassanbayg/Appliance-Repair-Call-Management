@@ -1,0 +1,83 @@
+@{
+    ViewData["Title"] = "Appliance Repair CRM";
+}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-1">Appliance Repair Leads</h1>
+        <p class="text-muted mb-0">Incoming recordings are processed in the background.</p>
+    </div>
+    <div class="d-flex gap-2 align-items-center">
+        <select id="sampleChoice" class="form-select" style="width:190px">
+            <option value="maria">Maria — Samsung fridge</option>
+            <option value="john">John — Whirlpool washer</option>
+            <option value="unknown">Unknown — oven</option>
+        </select>
+        <button id="simulateBtn" class="btn btn-primary">Simulate incoming call</button>
+    </div>
+</div>
+<div id="notice" class="alert alert-info d-none"></div>
+<div class="card shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr><th>Phone</th><th>Customer</th><th>Appliance</th><th>Brand</th><th>Problem</th><th>Urgency</th><th>Status</th><th>Received at</th></tr>
+            </thead>
+            <tbody id="callsBody"><tr><td colspan="8" class="text-center text-muted p-4">Loading calls...</td></tr></tbody>
+        </table>
+    </div>
+</div>
+@section Scripts {
+<script>
+const body = document.getElementById('callsBody');
+const notice = document.getElementById('notice');
+function esc(value) {
+    return String(value ?? '—').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+async function refreshCalls() {
+    try {
+        const response = await fetch('/api/calls');
+        if (!response.ok) throw new Error('Could not load calls');
+        const calls = await response.json();
+        if (!calls.length) {
+            body.innerHTML = '<tr><td colspan="8" class="text-center text-muted p-4">No calls yet. Simulate an incoming call to begin.</td></tr>';
+            return;
+        }
+        body.innerHTML = calls.map(c => `
+          <tr>
+            <td>${esc(c.from)}</td><td>${esc(c.customerName)}</td><td>${esc(c.appliance)}</td>
+            <td>${esc(c.brand)}</td><td style="min-width:220px">${esc(c.problem || c.errorMessage)}</td>
+            <td>${esc(c.urgency)}</td>
+            <td><span class="badge ${c.status === 'Done' ? 'text-bg-success' : c.status === 'Failed' ? 'text-bg-danger' : 'text-bg-warning'}">${esc(c.status)}</span></td>
+            <td>${new Date(c.receivedAt).toLocaleString()}</td>
+          </tr>`).join('');
+    } catch (error) { notice.textContent = error.message; notice.classList.remove('d-none'); }
+}
+document.getElementById('simulateBtn').addEventListener('click', async () => {
+    const button = document.getElementById('simulateBtn');
+    button.disabled = true;
+    notice.className = 'alert alert-info';
+    notice.textContent = 'Sending sample call to the webhook...';
+    try {
+        const sample = document.getElementById('sampleChoice').value;
+        const response = await fetch('/api/calls/recording', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                CallSid: 'SIM-' + crypto.randomUUID(),
+                From: sample === 'maria' ? '+14165550123' : sample === 'john' ? '+14165550124' : '+14165550125',
+                To: '+16475550199', RecordingSid: 'REC-' + Date.now(),
+                RecordingUrl: 'mock://' + sample, RecordingDuration: '47'
+            })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Webhook request failed');
+        notice.textContent = `Call #${result.callId} accepted. Status: ${result.status}. The table refreshes automatically.`;
+        await refreshCalls();
+    } catch (error) {
+        notice.className = 'alert alert-danger';
+        notice.textContent = error.message;
+    } finally { button.disabled = false; }
+});
+refreshCalls();
+setInterval(refreshCalls, 2000);
+</script>
+}
